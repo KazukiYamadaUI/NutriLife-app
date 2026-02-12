@@ -400,40 +400,60 @@ const CameraScreen = ({ mode: initMode, onCapture, onCancel }) => {
   const [mode,setMode]=useState(initMode||"camera");
   const [cap,setCap]=useState(false);
   const [selImg,setSelImg]=useState(null);
-  const cvRef=useRef(null);
+  const [cameraReady,setCameraReady]=useState(false);
+  const [cameraError,setCameraError]=useState(null);
+  const videoRef=useRef(null);
+  const canvasRef=useRef(null);
+  const streamRef=useRef(null);
   const fileRef=useRef(null);
 
-  useEffect(()=>{
-    if(mode!=="camera")return;
-    const cv=cvRef.current;if(!cv)return;const ctx=cv.getContext("2d");
-    const g=ctx.createLinearGradient(0,0,320,320);g.addColorStop(0,"#fef3c7");g.addColorStop(1,"#fed7aa");
-    ctx.fillStyle=g;ctx.fillRect(0,0,320,320);
-    ctx.beginPath();ctx.ellipse(160,165,110,85,0,0,Math.PI*2);ctx.fillStyle="#fff";ctx.fill();ctx.strokeStyle="#bbb";ctx.lineWidth=2;ctx.stroke();
-    ctx.fillStyle="#f87171";ctx.beginPath();ctx.arc(135,148,28,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#4ade80";ctx.beginPath();ctx.arc(185,158,20,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#fbbf24";ctx.beginPath();ctx.arc(150,188,22,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#fefce8";ctx.beginPath();ctx.ellipse(160,250,55,28,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle="#ddd";ctx.stroke();
-  },[mode]);
+  // Start real camera
+  const startCamera=useCallback(async()=>{
+    setCameraError(null);
+    try{
+      if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());}
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:960}},audio:false});
+      streamRef.current=stream;
+      if(videoRef.current){
+        const video=videoRef.current;
+        video.srcObject=stream;
+        video.onloadedmetadata=()=>{setCameraReady(true);};
+      }
+    }catch(err){
+      console.error("Camera error:",err);
+      setCameraError(err.name==="NotAllowedError"?"カメラの使用が許可されていません。\nブラウザの設定からカメラを許可してください。":"カメラを起動できませんでした。");
+    }
+  },[]);
 
-  // Demo album thumbnails
-  const albumItems=[
-    {id:1,emoji:"🍛",label:"カレーライス",bg:"#fef3c7"},
-    {id:2,emoji:"🍣",label:"お寿司",bg:"#fce7f3"},
-    {id:3,emoji:"🥗",label:"サラダ",bg:"#dcfce7"},
-    {id:4,emoji:"🍜",label:"ラーメン",bg:"#fef9c3"},
-    {id:5,emoji:"🍱",label:"お弁当",bg:"#e0f2fe"},
-    {id:6,emoji:"🐟",label:"焼き魚定食",bg:"#f3e8ff"},
-    {id:7,emoji:"🥪",label:"サンドイッチ",bg:"#fff7ed"},
-    {id:8,emoji:"🍙",label:"おにぎり",bg:"#ecfdf5"},
-    {id:9,emoji:"🍝",label:"パスタ",bg:"#fef2f2"},
-  ];
+  const stopCamera=useCallback(()=>{
+    if(videoRef.current){videoRef.current.onloadedmetadata=null;}
+    if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());streamRef.current=null;}
+    setCameraReady(false);
+  },[]);
+
+  useEffect(()=>{
+    if(mode==="camera")startCamera();
+    else stopCamera();
+    return ()=>stopCamera();
+  },[mode,startCamera,stopCamera]);
+
+  const handleCapture=()=>{
+    if(!videoRef.current||!canvasRef.current)return;
+    setCap(true);
+    const video=videoRef.current;
+    const canvas=canvasRef.current;
+    canvas.width=video.videoWidth||640;
+    canvas.height=video.videoHeight||480;
+    const ctx=canvas.getContext("2d");
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    stopCamera();
+    setTimeout(()=>onCapture(),600);
+  };
 
   const handleFilePick=(e)=>{
     const file=e.target.files?.[0];
     if(file){setSelImg({id:"file",emoji:"📷",label:file.name.slice(0,10),bg:"#f3f4f6",file});}
   };
-
-  const handleAlbumSelect=(item)=>{setSelImg(item);};
 
   const handleConfirmAlbum=()=>{setCap(true);setTimeout(()=>onCapture(),600);};
 
@@ -456,20 +476,16 @@ const CameraScreen = ({ mode: initMode, onCapture, onCancel }) => {
             style={{...baseBtn,width:"100%",minHeight:T.touchMin+8,borderRadius:T.radiusSm,border:`2px dashed ${T.green}`,background:T.greenLight,color:T.green,fontSize:T.fontBody,fontWeight:700,gap:10,marginBottom:16}}>
             <ImageIcon size={24} color={T.green}/>端末から写真を選択
           </button>
-          {/* Demo album grid */}
-          <p style={{fontSize:T.fontSub,fontWeight:700,color:T.textMuted,margin:"0 0 10px"}}>最近の写真（デモ）</p>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-            {albumItems.map(item=>(
-              <button key={item.id} onClick={()=>handleAlbumSelect(item)}
-                style={{...baseBtn,flexDirection:"column",gap:4,aspectRatio:"1",borderRadius:T.radiusSm,
-                  border:`3px solid ${selImg?.id===item.id?T.green:"transparent"}`,
-                  background:item.bg,position:"relative",overflow:"hidden"}}>
-                <span style={{fontSize:40}}>{item.emoji}</span>
-                <span style={{fontSize:T.fontSmall,fontWeight:600,color:T.textSub}}>{item.label}</span>
-                {selImg?.id===item.id&&<div style={{position:"absolute",top:6,right:6,width:26,height:26,borderRadius:"50%",background:T.green,display:"flex",alignItems:"center",justifyContent:"center"}}><CheckCircle size={18} color="#fff"/></div>}
-              </button>
-            ))}
-          </div>
+          {selImg&&(
+            <Card style={{display:"flex",alignItems:"center",gap:14,padding:14}}>
+              <span style={{fontSize:32}}>{selImg.emoji}</span>
+              <div style={{flex:1}}>
+                <p style={{margin:0,fontSize:T.fontBody,fontWeight:700,color:T.text}}>{selImg.label}</p>
+                <p style={{margin:"2px 0 0",fontSize:T.fontSmall,color:T.success,fontWeight:600}}>選択済み</p>
+              </div>
+              <CheckCircle size={24} color={T.success}/>
+            </Card>
+          )}
         </div>
         {/* Confirm bar */}
         <div style={{padding:"12px 20px 24px",borderTop:`2px solid ${T.border}`,background:T.card}}>
@@ -490,28 +506,53 @@ const CameraScreen = ({ mode: initMode, onCapture, onCancel }) => {
     );
   }
 
-  // Camera mode
+  // Camera mode (real)
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%",background:"#111"}}>
       <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <button onClick={onCancel} style={{...baseBtn,background:"none",color:"#fff",fontSize:T.fontBody,fontWeight:600,minHeight:T.touchMin,gap:6}}><ArrowLeft size={24} color="#fff"/> もどる</button>
+        <button onClick={()=>{stopCamera();onCancel();}} style={{...baseBtn,background:"none",color:"#fff",fontSize:T.fontBody,fontWeight:600,minHeight:T.touchMin,gap:6}}><ArrowLeft size={24} color="#fff"/> もどる</button>
       </div>
       {/* Mode toggle */}
       <div style={{display:"flex",padding:"0 16px 8px",gap:8}}>
         <button style={{...baseBtn,flex:1,minHeight:40,borderRadius:10,gap:6,background:"rgba(255,255,255,0.15)",border:"2px solid rgba(255,255,255,0.3)",color:"#fff",fontSize:T.fontSub,fontWeight:700}}><CameraIcon size={18} color="#fff"/>撮影する</button>
         <button onClick={()=>setMode("album")} style={{...baseBtn,flex:1,minHeight:40,borderRadius:10,gap:6,background:"transparent",border:"2px solid rgba(255,255,255,0.2)",color:"rgba(255,255,255,0.7)",fontSize:T.fontSub,fontWeight:500}}><ImageIcon size={18} color="rgba(255,255,255,0.7)"/>アルバム</button>
       </div>
-      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-        <canvas ref={cvRef} width={320} height={320} style={{borderRadius:16,maxWidth:"85%"}}/>
-        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}><div style={{width:260,height:260,border:"3px dashed rgba(255,255,255,0.35)",borderRadius:20}}/></div>
+      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
+        {/* Real camera video */}
+        <video ref={videoRef} autoPlay playsInline muted
+          style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:16,maxWidth:"92%",maxHeight:"100%",display:cameraReady?"block":"none"}}/>
+        {/* Hidden canvas for capture */}
+        <canvas ref={canvasRef} style={{display:"none"}}/>
+        {/* Loading state */}
+        {!cameraReady&&!cameraError&&(
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+            <div style={{width:44,height:44,border:"4px solid rgba(255,255,255,0.2)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+            <p style={{color:"rgba(255,255,255,0.7)",fontSize:T.fontBody}}>カメラを起動中...</p>
+          </div>
+        )}
+        {/* Error state */}
+        {cameraError&&(
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12,padding:24,textAlign:"center"}}>
+            <span style={{fontSize:48}}>📷</span>
+            <p style={{color:"rgba(255,255,255,0.9)",fontSize:T.fontBody,lineHeight:1.8,whiteSpace:"pre-line"}}>{cameraError}</p>
+            <button onClick={startCamera} style={{...baseBtn,padding:"10px 24px",borderRadius:10,background:"rgba(255,255,255,0.15)",border:"2px solid rgba(255,255,255,0.3)",color:"#fff",fontSize:T.fontSub,fontWeight:600}}>もう一度試す</button>
+          </div>
+        )}
+        {/* Guide overlay */}
+        {cameraReady&&(
+          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+            <div style={{width:260,height:260,border:"3px dashed rgba(255,255,255,0.35)",borderRadius:20}}/>
+          </div>
+        )}
+        {/* Capture feedback */}
         {cap&&<div style={{position:"absolute",inset:0,background:"rgba(255,255,255,0.85)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
           <div style={{width:44,height:44,border:"4px solid #ddd",borderTopColor:T.green,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
           <p style={{fontSize:T.fontBody,color:T.text,fontWeight:600}}>記録ありがとうございます！</p></div>}
       </div>
       <p style={{color:"rgba(255,255,255,0.8)",textAlign:"center",fontSize:T.fontSub,margin:"0 20px 12px",lineHeight:1.6,fontWeight:500}}>🍽️ 食べかけや、パックのままでもOKです</p>
       <div style={{display:"flex",justifyContent:"center",padding:"0 0 36px"}}>
-        <button onClick={()=>{setCap(true);setTimeout(()=>onCapture(),600);}} disabled={cap}
-          style={{...baseBtn,width:80,height:80,borderRadius:"50%",background:"#fff",border:"5px solid rgba(255,255,255,0.4)"}}>
+        <button onClick={handleCapture} disabled={cap||!cameraReady}
+          style={{...baseBtn,width:80,height:80,borderRadius:"50%",background:"#fff",border:"5px solid rgba(255,255,255,0.4)",opacity:cameraReady?1:0.4}}>
           <div style={{width:62,height:62,borderRadius:"50%",background:cap?"#ccc":T.orangeBg,transition:"background 0.2s"}}/></button>
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -1213,29 +1254,7 @@ export default function App() {
 
   const [notifSettings,setNotifSettings]=useState(null);
 
-  // Seed some demo logs for calendar demo
-  const seedRef=useRef(false);
-  useEffect(()=>{
-    if(seedRef.current)return; seedRef.current=true;
-    const today=new Date();
-    const demoLogs=[];
-    const foods=[
-      {name:"朝ごはん（卵焼き・味噌汁）",cal:350,p:18,f:12,c:40,fiber:3.0,salt:2.1,score:78,ingredients:["卵","豆腐","わかめ","ご飯"],missing:"ビタミンC",praise:"良い朝食です！☀️",advice:"朝にたんぱく質を摂れていて良いですね。お野菜を少し追加するとさらにバランスが良くなります。"},
-      {name:"鮭の塩焼き定食",cal:520,p:32,f:15,c:58,fiber:4.2,salt:2.8,score:82,ingredients:["鮭","ご飯","味噌汁","漬物"],missing:"ビタミンC",praise:"素晴らしい！🎉",advice:"おさかなのたんぱく質がしっかり摂れています。"},
-      {name:"カレーライス",cal:680,p:18,f:22,c:95,fiber:3.1,salt:3.5,score:65,ingredients:["ご飯","カレールー","じゃがいも","にんじん","玉ねぎ","豚肉"],missing:"食物繊維",praise:"記録できました！👍",advice:"エネルギーがしっかり摂れていますね。"},
-      {name:"おにぎりとお茶",cal:220,p:5,f:2,c:48,fiber:0.8,salt:1.2,score:45,ingredients:["ご飯","梅干し"],missing:"たんぱく質",praise:"記録ありがとう📝",advice:"たんぱく質が少なめです。次のお食事で補いましょう。"},
-    ];
-    for(let i=1;i<=5;i++){
-      const d=new Date(today);d.setDate(d.getDate()-i);
-      const cnt=1+Math.floor(Math.random()*2);
-      for(let j=0;j<cnt;j++){
-        const f=foods[Math.floor(Math.random()*foods.length)];
-        const h=j===0?8+Math.floor(Math.random()*3):12+Math.floor(Math.random()*7);
-        demoLogs.push({...f,time:`${h}:${String(Math.floor(Math.random()*60)).padStart(2,"0")}`,date:d.toDateString()});
-      }
-    }
-    setLogs(demoLogs);
-  },[]);
+  // No demo data - start fresh
 
   const nav=useCallback((s)=>{setDetailLog(null);setScreen(s);},[]);
   const handleAuth=(u)=>{setUser(u);setScreen("profileSetup");};
