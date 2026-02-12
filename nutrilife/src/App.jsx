@@ -405,27 +405,33 @@ const CameraScreen = ({ mode: initMode, onCapture, onCancel }) => {
   const videoRef=useRef(null);
   const canvasRef=useRef(null);
   const streamRef=useRef(null);
+  const activeRef=useRef(false);
   const fileRef=useRef(null);
 
   // Start real camera
   const startCamera=useCallback(async()=>{
+    activeRef.current=true;
     setCameraError(null);
     try{
       if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());}
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:960}},audio:false});
+      // If stopCamera was called while awaiting, discard the stream
+      if(!activeRef.current){stream.getTracks().forEach(t=>t.stop());return;}
       streamRef.current=stream;
       if(videoRef.current){
         const video=videoRef.current;
         video.srcObject=stream;
-        video.onloadedmetadata=()=>{setCameraReady(true);};
+        video.onloadedmetadata=()=>{if(activeRef.current)setCameraReady(true);};
       }
     }catch(err){
+      if(!activeRef.current)return;
       console.error("Camera error:",err);
       setCameraError(err.name==="NotAllowedError"?"カメラの使用が許可されていません。\nブラウザの設定からカメラを許可してください。":"カメラを起動できませんでした。");
     }
   },[]);
 
   const stopCamera=useCallback(()=>{
+    activeRef.current=false;
     if(videoRef.current){videoRef.current.onloadedmetadata=null;}
     if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());streamRef.current=null;}
     setCameraReady(false);
